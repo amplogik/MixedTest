@@ -1,5 +1,6 @@
 package com.bytewisenetworks.mixedtest;
 
+import android.app.Activity;
 import android.os.Build;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -23,9 +24,12 @@ import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
 import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
+import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.imgproc.Imgproc;
 
-public class MainActivity extends AppCompatActivity {
+//public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity implements CameraBridgeViewBase.CvCameraViewListener2 {
 
     /////////////////////////////////////////////////
     // VARIABLES
@@ -145,12 +149,12 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        mOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.tutorial2_activity_surface_view);
+        mOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.mainactivity_surface_view);
         mOpenCvCameraView.setVisibility(CameraBridgeViewBase.VISIBLE);
         mOpenCvCameraView.setCvCameraViewListener(this);
 
         // Example of a call to a native method
-        TextView tv = (TextView) findViewById(R.id.sample_text);
+        TextView tv = (TextView) findViewById(R.id.mainactivity_surface_view);
         tv.setText(stringFromJNI());
 
         //Initialize DJI SDK Manager
@@ -239,4 +243,90 @@ public class MainActivity extends AppCompatActivity {
     /////////////////////////////////////////////////
     // more functions here
     /////////////////////////////////////////////////
+    @Override
+    public void onPause()
+    {
+        super.onPause();
+        if (mOpenCvCameraView != null)
+            mOpenCvCameraView.disableView();
+    }
+
+    @Override
+    public void onResume()
+    {
+        super.onResume();
+        if (!OpenCVLoader.initDebug()) {
+            Log.d(TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
+            OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_3_0_0, this, mLoaderCallback);
+        } else {
+            Log.d(TAG, "OpenCV library found inside package. Using it!");
+            mLoaderCallback.onManagerConnected(LoaderCallbackInterface.SUCCESS);
+        }
+    }
+
+    public void onDestroy() {
+        super.onDestroy();
+        if (mOpenCvCameraView != null)
+            mOpenCvCameraView.disableView();
+    }
+
+    public void onCameraViewStarted(int width, int height) {
+        mRgba = new Mat(height, width, CvType.CV_8UC4);
+        mIntermediateMat = new Mat(height, width, CvType.CV_8UC4);
+        mGray = new Mat(height, width, CvType.CV_8UC1);
+    }
+
+    public void onCameraViewStopped() {
+        mRgba.release();
+        mGray.release();
+        mIntermediateMat.release();
+    }
+
+    public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
+        final int viewMode = mViewMode;
+        switch (viewMode) {
+            case VIEW_MODE_GRAY:
+                // input frame has gray scale format
+                Imgproc.cvtColor(inputFrame.gray(), mRgba, Imgproc.COLOR_GRAY2RGBA, 4);
+                break;
+            case VIEW_MODE_RGBA:
+                // input frame has RBGA format
+                mRgba = inputFrame.rgba();
+                break;
+            case VIEW_MODE_CANNY:
+                // input frame has gray scale format
+                mRgba = inputFrame.rgba();
+                Imgproc.Canny(inputFrame.gray(), mIntermediateMat, 80, 100);
+                Imgproc.cvtColor(mIntermediateMat, mRgba, Imgproc.COLOR_GRAY2RGBA, 4);
+                break;
+            case VIEW_MODE_FEATURES:
+                // input frame has RGBA format
+                mRgba = inputFrame.rgba();
+                mGray = inputFrame.gray();
+                FindFeatures(mGray.getNativeObjAddr(), mRgba.getNativeObjAddr());
+                break;
+        }
+
+        return mRgba;
+    }
+
+    public boolean onOptionsItemSelected(MenuItem item) {
+        Log.i(TAG, "called onOptionsItemSelected; selected item: " + item);
+
+        if (item == mItemPreviewRGBA) {
+            mViewMode = VIEW_MODE_RGBA;
+        } else if (item == mItemPreviewGray) {
+            mViewMode = VIEW_MODE_GRAY;
+        } else if (item == mItemPreviewCanny) {
+            mViewMode = VIEW_MODE_CANNY;
+        } else if (item == mItemPreviewFeatures) {
+            mViewMode = VIEW_MODE_FEATURES;
+        }
+
+        return true;
+    }
+    /////////////////////////////////////////////////
+    // A native method
+    /////////////////////////////////////////////////
+    public native void FindFeatures(long matAddrGr, long matAddrRgba);
 }
