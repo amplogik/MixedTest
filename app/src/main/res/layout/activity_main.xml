@@ -3,9 +3,10 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent" >
 
-    <org.opencv.android.JavaCameraView
-        android:layout_width="fill_parent"
-        android:layout_height="fill_parent"
+    <com.bytewisenetworks.mixedtest.MainView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
         android:id="@+id/mainactivity_surface_view" />
 
 </LinearLayout>
