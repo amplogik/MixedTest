@@ -48,22 +48,45 @@ import android.view.View;
 import android.view.View.OnTouchListener;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 
 import dji.common.error.DJIError;
 import dji.common.error.DJISDKError;
+import dji.common.realname.AircraftBindingState;
+import dji.common.realname.AppActivationState;
+import dji.common.useraccount.UserAccountState;
+import dji.common.util.CommonCallbacks;
 import dji.sdk.base.BaseComponent;
 import dji.sdk.base.BaseProduct;
+import dji.sdk.realname.AppActivationManager;
 import dji.sdk.sdkmanager.DJISDKManager;
+import dji.sdk.useraccount.UserAccountManager;
 
 
 public class MainActivity extends Activity implements CvCameraViewListener2, OnTouchListener {
 
-// public class MainActivity extends AppCompatActivity  implements CvCameraViewListener2, OnTouchListener {
+    /* tag for logging */
+    private static final String TAG = MainActivity.class.getName();
 
-    // General Class vars
-    private static final String TAG = "OCVSample::MainActivity";
+    /* DJI vars */
+    public static final String FLAG_CONNECTION_CHANGE = "dji_sdk_connection_change";
+    private static BaseProduct mProduct;
+    private Handler mHandler;
+
+    /* UX vars */
+    protected Button loginBtn;
+    protected Button logoutBtn;
+    protected TextView bindingStateTV;
+    protected TextView appActivationStateTV;
+    private AppActivationManager appActivationManager;
+    private AppActivationState.AppActivationStateListener activationStateListener;
+    private AircraftBindingState.AircraftBindingStateListener bindingStateListener;
+
+    /* General Class vars */
+    //private static final String TAG = "OCVSample::MainActivity";
     private MainView mOpenCvCameraView;
     private List<Size> mResolutionList;
     private MenuItem[] mEffectMenuItems;
@@ -71,23 +94,23 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
     private MenuItem[] mResolutionMenuItems;
     private SubMenu mResolutionMenu;
     private MediaPlayer mp;
+    private int frameNumber;
 
-    // OpenCV vars
+    /* OpenCV vars */
     private boolean              mIsColorSelected = false;
     private Mat                  mRgba;
+    //private Mat                  lastFrame = new Mat();
     private Scalar               mBlobColorRgba;
     private Scalar               mBlobColorHsv;
-    private ColorBlobDetector    mDetector;
+    // private ColorBlobDetector    mDetector;
     private Mat                  mSpectrum;
     private org.opencv.core.Size SPECTRUM_SIZE;
     private Scalar               CONTOUR_COLOR;
 
-    // DJI  vars
-    //private static final String TAG = MainActivity.class.getName();
-    public static final String FLAG_CONNECTION_CHANGE = "dji_sdk_connection_change";
-    private static BaseProduct mProduct;
-    private Handler mHandler;
+    // move Instruction vars
+    private boolean colorFieldMatch = false;
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
         public void onManagerConnected(int status) {
@@ -106,10 +129,12 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         }
     };
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     public MainActivity() {
         Log.i(TAG, "Instantiated new " + this.getClass());
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     /** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -159,7 +184,16 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         // launch main window
+        // OpenCV Camera
         setContentView(R.layout.activity_main);
+
+        /*
+        // DJI UX
+        setContentView(R.layout.dji_view);
+
+        // init DJI UX
+        initUI();
+        */
 
         //Initialize DJI SDK Manager
         mHandler = new Handler(Looper.getMainLooper());
@@ -168,20 +202,163 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         // bind the camera to the view
         mOpenCvCameraView = findViewById(R.id.mainactivity_surface_view);
         mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
+        // downscale frame to lower processing requirements
+        // native 1440 x 2560 pixels, 16:9 ratio
+        //mOpenCvCameraView.setMaxFrameSize(176, 152);
+        mOpenCvCameraView.setMaxFrameSize(720, 405);
         mOpenCvCameraView.setCvCameraViewListener(this);
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    //@Override
+    public void onClick(View v) {
+        switch (v.getId()) {
+            case R.id.btn_login:{
+                break;
+            }
+            case R.id.btn_logout:{
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     @Override
-    public void onPause()
-    {
+    public void onPause() {
         super.onPause();
         if (mOpenCvCameraView != null)
             mOpenCvCameraView.disableView();
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    private void initUI(){
+        bindingStateTV = (TextView) findViewById(R.id.tv_binding_state_info);
+        appActivationStateTV = (TextView) findViewById(R.id.tv_activation_state_info);
+        loginBtn = (Button) findViewById(R.id.btn_login);
+        logoutBtn = (Button) findViewById(R.id.btn_logout);
+        /*
+        loginBtn.setOnClickListener(this);
+        logoutBtn.setOnClickListener(this);
+        */
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    private void initData(){
+        setUpListener();
+
+        appActivationManager = DJISDKManager.getInstance().getAppActivationManager();
+
+        if (appActivationManager != null) {
+            appActivationManager.addAppActivationStateListener(activationStateListener);
+            appActivationManager.addAircraftBindingStateListener(bindingStateListener);
+            MainActivity.this.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    appActivationStateTV.setText("" + appActivationManager.getAppActivationState());
+                    bindingStateTV.setText("" + appActivationManager.getAircraftBindingState());
+
+                }
+            });
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    private void setUpListener() {
+        // Example of Listener
+        activationStateListener = new AppActivationState.AppActivationStateListener() {
+            @Override
+            public void onUpdate(final AppActivationState appActivationState) {
+                MainActivity.this.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        appActivationStateTV.setText("" + appActivationState);
+                    }
+                });
+            }
+        };
+
+        bindingStateListener = new AircraftBindingState.AircraftBindingStateListener() {
+
+            @Override
+            public void onUpdate(final AircraftBindingState bindingState) {
+                MainActivity.this.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        bindingStateTV.setText("" + bindingState);
+                    }
+                });
+            }
+        };
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    private void tearDownListener() {
+        if (activationStateListener != null) {
+            appActivationManager.removeAppActivationStateListener(activationStateListener);
+            MainActivity.this.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    appActivationStateTV.setText("Unknown");
+                }
+            });
+        }
+        if (bindingStateListener !=null) {
+            appActivationManager.removeAircraftBindingStateListener(bindingStateListener);
+            MainActivity.this.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    bindingStateTV.setText("Unknown");
+                }
+            });
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    public void showToast(final String msg) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    private void loginAccount(){
+
+        UserAccountManager.getInstance().logIntoDJIUserAccount(this,
+                new CommonCallbacks.CompletionCallbackWith<UserAccountState>() {
+                    @Override
+                    public void onSuccess(final UserAccountState userAccountState) {
+                        showToast("Login Success");
+                    }
+                    @Override
+                    public void onFailure(DJIError error) {
+                        showToast("Login Error:"
+                                + error.getDescription());
+                    }
+                });
+
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    private void logoutAccount(){
+        UserAccountManager.getInstance().logoutOfDJIUserAccount(new CommonCallbacks.CompletionCallback() {
+            @Override
+            public void onResult(DJIError error) {
+                if (null == error) {
+                    showToast("Logout Success");
+                } else {
+                    showToast("Logout Error:"
+                            + error.getDescription());
+                }
+            }
+        });
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     @Override
-    public void onResume()
-    {
+    public void onResume() {
         super.onResume();
         if (!OpenCVLoader.initDebug()) {
             Log.d(TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
@@ -192,65 +369,106 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         }
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     public void onDestroy() {
         super.onDestroy();
         if (mOpenCvCameraView != null)
             mOpenCvCameraView.disableView();
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     public void onCameraViewStarted(int width, int height) {
         mRgba = new Mat(height, width, CvType.CV_8UC4);
-        mDetector = new ColorBlobDetector();
+        // used here but never called again.
+        //  mDetector = new ColorBlobDetector();
         mSpectrum = new Mat();
         mBlobColorRgba = new Scalar(255);
         mBlobColorHsv = new Scalar(255);
-        // have to explicitly define package name because Szze is
+        // have to explicitly define package name because Size is
         // also part of android camera
         SPECTRUM_SIZE = new org.opencv.core.Size(200, 64);
         CONTOUR_COLOR = new Scalar(255,0,0,255);
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     public void onCameraViewStopped() {
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
         Mat lowerRed = new Mat();
         Mat upperRed = new Mat();
-        Mat redHueImage = new Mat();
+        Mat redChannelImage = new Mat();
         Mat green;
         Mat blue;
         Mat orange;
-        mRgba = inputFrame.rgba();
+        String LogMessage = new String();
 
+
+        // only process every  frame
+
+        frameNumber++;
+
+
+
+        // convert frame to RGBA image
+        mRgba = inputFrame.rgba();
         // Core.flip(mRgba, mRgba, 1);
 
+        // create new image matrix for storing HSV image
         Mat HSVMat = new Mat();
 
-        Imgproc.medianBlur(mRgba,mRgba,3);
+        // Blur RGB image
+        Imgproc.medianBlur(mRgba, mRgba, 3);
+
+        // conver RGB image to HSV image
         Imgproc.cvtColor(mRgba, HSVMat, Imgproc.COLOR_RGB2HSV, 0);
 
+        //Log.i(TAG, "onCameraFrame: " + frameNumber);
+        //LogMessage = "HSVMat Framesize: "+ String.valueOf(HSVMat.cols()) +  ' ' + String.valueOf(HSVMat.rows());
+        //Log.i(TAG, LogMessage );
+
         // inRange HSV args are Hue Saturation
-        /*
         Core.inRange(HSVMat,new Scalar(0,100,100),new Scalar(10,255,255),lowerRed);
         Core.inRange(HSVMat,new Scalar(160,100,100),new Scalar(179,255,255),upperRed);
+        Core.addWeighted(lowerRed, 1.0, upperRed, 1.0, 0.0, redChannelImage);
+
+        //Log.i(TAG, "onCameraFrame: " + frameNumber);
+        //LogMessage = "redChannelImage Framesize: "+ String.valueOf(redChannelImage.cols()) +  ' ' + String.valueOf(redChannelImage.rows());
+        //Log.i(TAG, LogMessage );
+
+        /*
+        // Use HSV image, and detect lower range red
+        Core.inRange(HSVMat, new Scalar(200, 25, 25), new Scalar(250, 50, 50), lowerRed);
+        // detect upper range red
+        Core.inRange(HSVMat, new Scalar(200, 75 , 75), new Scalar(255, 100, 100), upperRed);
+        // add lower and upper ranges o the 'redChannelImage' result
+        Core.addWeighted(lowerRed, 1.0, upperRed, 1.0, 0.0, redChannelImage);
         */
-        Core.inRange(HSVMat,new Scalar(100,100,0),new Scalar(255,255,0),lowerRed);
-        Core.inRange(HSVMat,new Scalar(160,100,100),new Scalar(255,255,180),upperRed);
 
-        Core.addWeighted(lowerRed,1.0,upperRed,1.0,0.0,redHueImage);
+        /*
+        Core.inRange(HSVMat, new Scalar(200, 100, 100), new Scalar(255, 255, 255), redChannelImage);
+        */
 
-        Imgproc.GaussianBlur(redHueImage, redHueImage, new org.opencv.core.Size(9, 9), 2, 2);
+        // blur the result to remove noise (9px or under)
+        Imgproc.GaussianBlur(redChannelImage, redChannelImage, new org.opencv.core.Size(9, 9), 2, 2);
 
+        /*
         double dp = 1.2d;
         double minDist = 100;
         int minRadius = 0;
         int maxRadius = 0;
         double param1 = 100, param2 = 20;
+
+        // create a circles matrix (draw circles for image)
         Mat circles = new Mat();
 
-        Imgproc.HoughCircles(redHueImage, circles, Imgproc.HOUGH_GRADIENT, dp, redHueImage.rows()/8, param1, param2, minRadius, maxRadius);
+        // take the 'redChannelImage' and draw circles image from it.
+        Imgproc.HoughCircles(redChannelImage, circles, Imgproc.HOUGH_GRADIENT, dp, redChannelImage.rows() / 8, param1, param2, minRadius, maxRadius);
+
+        // count the number of circles
         int numCircles = (circles.rows() == 0) ? 0 : circles.cols();
-        /*
+
         for (int i = 0; i < numCircles; i++) {
             double[] circleCoordinates = circles.get(0, i);
             int x = (int) circleCoordinates[0], y = (int) circleCoordinates[1];
@@ -258,8 +476,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
             int radius = (int) circleCoordinates[2];
             Imgproc.circle(mRgba, center, radius, new Scalar(0, 255, 0), 4);
         }
-        */
-        /*
+
         if(numCircles > 0){
             for (int i = 0; i < numCircles; i++){
                 final MediaPlayer mp = MediaPlayer.create(this, R.raw.beep2);
@@ -273,9 +490,84 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         upperRed.release();
         HSVMat.release();
 
-        return mRgba;
+        // colorFieldMatch
+        // test to see if we should continue forwar
+        // setMaxFrameSize(720, 405);
+
+        int x = 0;  // half frame height
+        int y = 0;  // half frame height
+        int w = 200;
+        int h = 200;
+
+        // extract centre of frame for testing
+        //Rect extractedRect = new Rect (x, y, w, h);
+
+        Rect extractedRect = new Rect (0,0,redChannelImage.cols(),redChannelImage.rows()/2);
+        Mat extractedMat = new Mat(redChannelImage, extractedRect);
+
+        //Log.i(TAG, "onCameraFrame: " + frameNumber);
+        //LogMessage = "extractedMat Framesize: "+ String.valueOf(extractedMat.cols()) +  ' ' + String.valueOf(extractedMat.rows());
+        //Log.i(TAG, LogMessage );
+        /*
+        Mat extractedMat = new Mat(redChannelImage, extractedRect);
+        */
+
+
+        // count the number of items matching color in the top frame
+        double dp = 1.2d;
+        double minDist = 100;
+        int minRadius = 0;
+        int maxRadius = 0;
+        double param1 = 100, param2 = 20;
+        Mat circles = new Mat();
+
+        Imgproc.HoughCircles(extractedMat, circles, Imgproc.HOUGH_GRADIENT, dp, extractedMat.rows() / 8, param1, param2, minRadius, maxRadius);
+        // count the number of circles
+        int numCircles = (circles.rows() == 0) ? 0 : circles.cols();
+        String ToastMessage = "Matches: " + String.valueOf(numCircles);
+
+        //Log.i(TAG, ToastMessage );
+
+
+        if(colorFieldMatch == true){
+            if(numCircles < 1){
+                colorFieldMatch = false;
+                // send notice
+                //Toast.makeText(this, ToastMessage, Toast.LENGTH_SHORT).show();
+                ToastMessage = "Setting false";
+                Log.i(TAG, ToastMessage );
+            } else {
+                colorFieldMatch = true;   // continue on moving in heading direction
+            }
+        } else {
+            if(numCircles > 0){
+                ToastMessage = "Setting true";
+                Log.i(TAG, ToastMessage );
+                colorFieldMatch = true;
+            } else {
+                colorFieldMatch = false;  // change heading 
+                // send message
+                //Toast.makeText(this, ToastMessage, Toast.LENGTH_SHORT).show();
+            }
+        }
+
+
+
+        // return the RGB Image for display
+        // return mRgba;
+        /*
+        //return the HSV image for display - this won't work
+        return extractedImage;  // must be the same size as the input image in rows/cols
+        */
+
+
+        return redChannelImage;
+
+        //return redChannelImage;
+
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         List<String> effects = mOpenCvCameraView.getEffectList();
@@ -312,6 +604,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         return true;
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     public boolean onOptionsItemSelected(MenuItem item) {
         Log.i(TAG, "called onOptionsItemSelected; selected item: " + item);
         if (item.getGroupId() == 1)
@@ -333,6 +626,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
     }
 
     @SuppressLint("SimpleDateFormat")
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     @Override
     public boolean onTouch(View v, MotionEvent event) {
         Log.i(TAG,"onTouch event");
@@ -349,10 +643,12 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
                 "/sample_picture_" + currentDateandTime + ".jpg";
         mOpenCvCameraView.takePicture(fileName);
 
+        // send toast notification window
         Toast.makeText(this, fileName + " saved", Toast.LENGTH_SHORT).show();
         return false;
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     // DJISDKManager
     private DJISDKManager.SDKManagerCallback mDJISDKManagerCallback = new DJISDKManager.SDKManagerCallback() {
         @Override
@@ -388,6 +684,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
         }
     };
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     private BaseProduct.BaseProductListener mDJIBaseProductListener = new BaseProduct.BaseProductListener() {
         @Override
         public void onComponentChange(BaseProduct.ComponentKey key, BaseComponent oldComponent, BaseComponent newComponent) {
@@ -401,16 +698,21 @@ public class MainActivity extends Activity implements CvCameraViewListener2, OnT
             notifyStatusChange();
         }
     };
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     private BaseComponent.ComponentListener mDJIComponentListener = new BaseComponent.ComponentListener() {
         @Override
         public void onConnectivityChange(boolean isConnected) {
             notifyStatusChange();
         }
     };
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     private void notifyStatusChange() {
         mHandler.removeCallbacks(updateRunnable);
         mHandler.postDelayed(updateRunnable, 500);
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     private Runnable updateRunnable = new Runnable() {
         @Override
         public void run() {
